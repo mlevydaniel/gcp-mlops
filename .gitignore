@@ -1,0 +1,7 @@
+*.DS_Store
+*.joblib
+__pycache__/
+*.pyc
+*/dataanalytics-347914-fd6f7b46fd46.json
+*/dataanalytics-347914-*
+*.pkl

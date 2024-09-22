@@ -1,0 +1,115 @@
+{
+  "components": {
+    "comp-custom-training-job-component": {
+      "executorLabel": "exec-custom-training-job-component",
+      "inputDefinitions": {
+        "parameters": {
+          "hyper_params": {
+            "parameterType": "STRUCT"
+          },
+          "model_name": {
+            "parameterType": "STRING"
+          }
+        }
+      },
+      "outputDefinitions": {
+        "artifacts": {
+          "metrics": {
+            "artifactType": {
+              "schemaTitle": "system.Metrics",
+              "schemaVersion": "0.0.1"
+            }
+          }
+        }
+      }
+    }
+  },
+  "deploymentSpec": {
+    "executors": {
+      "exec-custom-training-job-component": {
+        "container": {
+          "args": [
+            "--executor_input",
+            "{{$}}",
+            "--function_to_execute",
+            "custom_training_job_component"
+          ],
+          "command": [
+            "sh",
+            "-c",
+            "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip || python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet --no-warn-script-location 'kfp==2.8.0' '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"'  &&  python3 -m pip install --quiet --no-warn-script-location 'google-cloud-aiplatform' 'gcsfs' 'xgboost' 'category_encoders' 'imblearn' 'pandas' 'google-cloud-storage' 'numpy' && \"$0\" \"$@\"\n",
+            "sh",
+            "-ec",
+            "program_path=$(mktemp -d)\n\nprintf \"%s\" \"$0\" > \"$program_path/ephemeral_component.py\"\n_KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         \"$program_path/ephemeral_component.py\"                         \"$@\"\n",
+            "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import *\n\ndef custom_training_job_component(\n    hyper_params: dict,\n    model_name: str,\n    metrics: Output[Metrics]\n):\n    import pandas as pd\n    import numpy as np\n    from sklearn.model_selection import train_test_split\n    from sklearn.ensemble import RandomForestRegressor\n    from xgboost import XGBRegressor\n    from sklearn.svm import SVR\n    from sklearn.metrics import mean_squared_error\n    from google.cloud import storage\n    from sklearn.pipeline import make_pipeline\n\n    storage_client = storage.Client()\n    bucket = storage_client.bucket(\"udemy-gcp-mlops\")\n\n\n    def load_data(filename):\n        df = pd.read_csv(filename)\n        return df\n\n\n    def preprocess_data(df):\n        df = df.rename(columns={'weathersit': 'weather',\n                                'yr': 'year',\n                                'mnth': 'month',\n                                'hr': 'hour',\n                                'hum': 'humidity',\n                                'cnt': 'count'})\n        df = df.drop(columns=['instant', 'dteday', 'year'])\n        cols = ['season', 'month', 'hour', 'holiday', 'weekday', 'workingday', 'weather']\n        for col in cols:\n            df[col] = df[col].astype('category')\n        df['count'] = np.log(df['count'])\n        df_oh = df.copy()\n        for col in cols:\n            df_oh = one_hot_encoding(df_oh, col)\n        X = df_oh.drop(columns=['atemp', 'windspeed', 'casual', 'registered', 'count'], axis=1)\n        y = df_oh['count']\n        return X, y\n\n\n    def one_hot_encoding(data, column):\n        data = pd.concat([data, pd.get_dummies(data[column], prefix=column, drop_first=True)], axis=1)\n        data = data.drop([column], axis=1)\n        return data\n\n\n    def train_model(model_name, x_train, y_train, hyper_params):\n\n        if model_name == 'random_forest':\n            max_depth = hyper_params['max_depth']\n            n_estimators = hyper_params['n_estimators']\n\n            model = RandomForestRegressor(max_depth=max_depth, n_estimators=n_estimators)\n            pipeline = make_pipeline(model)\n            pipeline.fit(x_train, y_train)\n            return pipeline\n\n        elif model_name == 'xgboost':\n            max_depth = hyper_params['max_depth']\n            learning_rate = hyper_params['learning_rate']\n            n_estimators = hyper_params['n_estimators']\n\n            model = XGBRegressor(max_depth=max_depth, learning_rate=learning_rate, n_estimators=n_estimators)\n            pipeline = make_pipeline(model)\n            pipeline.fit(x_train, y_train)\n            return pipeline\n\n        elif model_name == 'svr':\n            kernel = hyper_params['kernel']\n            C = hyper_params['C']\n            epsilon = hyper_params['epsilon']\n\n            model = SVR(kernel=kernel, C=C, epsilon=epsilon)\n            pipeline = make_pipeline(model)\n            pipeline.fit(x_train, y_train)\n            return pipeline\n\n        else:\n            raise ValueError(\"Invalid model_name. Choose from 'random_forest', 'xgboost', or 'svr'.\")\n\n    filename = 'gs://udemy-gcp-mlops/bikeshare-model/hour.csv'\n    df = load_data(filename)\n\n    X, y = preprocess_data(df)\n    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.25, random_state=42)\n\n    pipeline = train_model(model_name, X_train, y_train, hyper_params)\n    y_pred = pipeline.predict(X_test)\n\n    rmse = np.sqrt(mean_squared_error(y_test, y_pred))\n    metrics.log_metric(\"RMSE\", rmse)\n\n"
+          ],
+          "image": "python:3.8"
+        }
+      }
+    }
+  },
+  "pipelineInfo": {
+    "name": "regression-model-pipeline"
+  },
+  "root": {
+    "dag": {
+      "outputs": {
+        "artifacts": {
+          "custom-training-job-component-metrics": {
+            "artifactSelectors": [
+              {
+                "outputArtifactKey": "metrics",
+                "producerSubtask": "custom-training-job-component"
+              }
+            ]
+          }
+        }
+      },
+      "tasks": {
+        "custom-training-job-component": {
+          "cachingOptions": {
+            "enableCache": true
+          },
+          "componentRef": {
+            "name": "comp-custom-training-job-component"
+          },
+          "inputs": {
+            "parameters": {
+              "hyper_params": {
+                "componentInputParameter": "hyper_params"
+              },
+              "model_name": {
+                "componentInputParameter": "model_name"
+              }
+            }
+          },
+          "taskInfo": {
+            "name": "custom-training-job-component"
+          }
+        }
+      }
+    },
+    "inputDefinitions": {
+      "parameters": {
+        "hyper_params": {
+          "parameterType": "STRUCT"
+        },
+        "model_name": {
+          "parameterType": "STRING"
+        }
+      }
+    },
+    "outputDefinitions": {
+      "artifacts": {
+        "custom-training-job-component-metrics": {
+          "artifactType": {
+            "schemaTitle": "system.Metrics",
+            "schemaVersion": "0.0.1"
+          }
+        }
+      }
+    }
+  },
+  "schemaVersion": "2.1.0",
+  "sdkVersion": "kfp-2.8.0"
+}

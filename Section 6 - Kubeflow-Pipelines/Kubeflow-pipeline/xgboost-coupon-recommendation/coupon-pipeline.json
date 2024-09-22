@@ -1,0 +1,253 @@
+{
+  "components": {
+    "comp-condition-1": {
+      "dag": {
+        "outputs": {
+          "artifacts": {
+            "custom-training-job-component-metrics": {
+              "artifactSelectors": [
+                {
+                  "outputArtifactKey": "metrics",
+                  "producerSubtask": "custom-training-job-component"
+                }
+              ]
+            }
+          }
+        },
+        "tasks": {
+          "custom-training-job-component": {
+            "cachingOptions": {
+              "enableCache": true
+            },
+            "componentRef": {
+              "name": "comp-custom-training-job-component"
+            },
+            "inputs": {
+              "parameters": {
+                "learning_rate": {
+                  "runtimeValue": {
+                    "constant": 0.2
+                  }
+                },
+                "max_depth": {
+                  "runtimeValue": {
+                    "constant": 5.0
+                  }
+                },
+                "n_estimators": {
+                  "runtimeValue": {
+                    "constant": 40.0
+                  }
+                }
+              }
+            },
+            "taskInfo": {
+              "name": "custom-training-job-component"
+            }
+          }
+        }
+      },
+      "inputDefinitions": {
+        "parameters": {
+          "pipelinechannel--validate-input-ds-input_validation": {
+            "parameterType": "STRING"
+          }
+        }
+      },
+      "outputDefinitions": {
+        "artifacts": {
+          "custom-training-job-component-metrics": {
+            "artifactType": {
+              "schemaTitle": "system.Metrics",
+              "schemaVersion": "0.0.1"
+            }
+          }
+        }
+      }
+    },
+    "comp-custom-training-job-component": {
+      "executorLabel": "exec-custom-training-job-component",
+      "inputDefinitions": {
+        "parameters": {
+          "learning_rate": {
+            "parameterType": "NUMBER_DOUBLE"
+          },
+          "max_depth": {
+            "parameterType": "NUMBER_INTEGER"
+          },
+          "n_estimators": {
+            "parameterType": "NUMBER_INTEGER"
+          }
+        }
+      },
+      "outputDefinitions": {
+        "artifacts": {
+          "metrics": {
+            "artifactType": {
+              "schemaTitle": "system.Metrics",
+              "schemaVersion": "0.0.1"
+            }
+          }
+        },
+        "parameters": {
+          "model_validation": {
+            "parameterType": "STRING"
+          }
+        }
+      }
+    },
+    "comp-validate-input-ds": {
+      "executorLabel": "exec-validate-input-ds",
+      "inputDefinitions": {
+        "parameters": {
+          "filename": {
+            "parameterType": "STRING"
+          }
+        }
+      },
+      "outputDefinitions": {
+        "parameters": {
+          "input_validation": {
+            "parameterType": "STRING"
+          }
+        }
+      }
+    }
+  },
+  "defaultPipelineRoot": "gs://udemy-gcp-mlops/coupon-pipeline-v1",
+  "deploymentSpec": {
+    "executors": {
+      "exec-custom-training-job-component": {
+        "container": {
+          "args": [
+            "--executor_input",
+            "{{$}}",
+            "--function_to_execute",
+            "custom_training_job_component"
+          ],
+          "command": [
+            "sh",
+            "-c",
+            "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip || python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet --no-warn-script-location 'kfp==2.8.0' '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"'  &&  python3 -m pip install --quiet --no-warn-script-location 'google-cloud-aiplatform' 'gcsfs' 'xgboost' 'category_encoders' 'imblearn' 'pandas' 'google-cloud-storage' && \"$0\" \"$@\"\n",
+            "sh",
+            "-ec",
+            "program_path=$(mktemp -d)\n\nprintf \"%s\" \"$0\" > \"$program_path/ephemeral_component.py\"\n_KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         \"$program_path/ephemeral_component.py\"                         \"$@\"\n",
+            "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import *\n\ndef custom_training_job_component(\n    max_depth:int,\n    learning_rate:float,\n    n_estimators:int,\n    metrics: Output[Metrics]\n) -> NamedTuple(\"output\", [(\"model_validation\", str)]):\n\n    import pandas as pd\n    from sklearn.metrics import precision_score, recall_score, roc_auc_score, accuracy_score\n    from sklearn.model_selection import train_test_split\n    from category_encoders import HashingEncoder\n    from imblearn.over_sampling import SMOTE\n    from xgboost import XGBClassifier\n    from google.cloud import storage\n\n    storage_client = storage.Client()\n    bucket = storage_client.bucket(\"udemy-gcp-mlops\")\n\n    def load_data(file_path):\n        df = pd.read_csv(file_path)\n        return df\n\n    def preprocess_data(df):\n\n        df = df.drop(columns=['car', 'toCoupon_GEQ5min', 'direction_opp'])\n        df = df.fillna(df.mode().iloc[0])\n        df = df.drop_duplicates()\n\n        df_dummy = df.copy()\n        age_list = []\n        for i in df['age']:\n            if i == 'below21':\n                age = '<21'\n            elif i in ['21', '26']:\n                age = '21-30'\n            elif i in ['31', '36']:\n                age = '31-40'\n            elif i in ['41', '46']:\n                age = '41-50'\n            else:\n                age = '>50'\n            age_list.append(age)\n        df_dummy['age'] = age_list\n\n        df_dummy['passanger_destination'] = df_dummy['passanger'].astype(str) + '-' + df_dummy['destination'].astype(str)\n        df_dummy['marital_hasChildren'] = df_dummy['maritalStatus'].astype(str) + '-' + df_dummy['has_children'].astype(str)\n        df_dummy['temperature_weather'] = df_dummy['temperature'].astype(str) + '-' + df_dummy['weather'].astype(str)\n        df_dummy = df_dummy.drop(columns=['passanger', 'destination', 'maritalStatus', 'has_children', 'temperature','weather', 'Y'])\n\n        df_dummy = pd.concat([df_dummy, df['Y']], axis = 1)\n        df_dummy = df_dummy.drop(columns=['gender', 'RestaurantLessThan20'])\n        df_le = df_dummy.replace({\n            'expiration':{'2h': 0, '1d' : 1},\n            'age':{'<21': 0, '21-30': 1, '31-40': 2, '41-50': 3, '>50': 4},\n            'education':{'Some High School': 0, 'High School Graduate': 1, 'Some college - no degree': 2,\n                         'Associates degree': 3, 'Bachelors degree': 4, 'Graduate degree (Masters or Doctorate)': 5},\n            'Bar':{'never': 0, 'less1': 1, '1~3': 2, '4~8': 3, 'gt8': 4},\n            'CoffeeHouse':{'never': 0, 'less1': 1, '1~3': 2, '4~8': 3, 'gt8': 4}, \n            'CarryAway':{'never': 0, 'less1': 1, '1~3': 2, '4~8': 3, 'gt8': 4}, \n            'Restaurant20To50':{'never': 0, 'less1': 1, '1~3': 2, '4~8': 3, 'gt8': 4},\n            'income':{'Less than $12500':0, '$12500 - $24999':1, '$25000 - $37499':2, '$37500 - $49999':3,\n                      '$50000 - $62499':4, '$62500 - $74999':5, '$75000 - $87499':6, '$87500 - $99999':7,\n                      '$100000 or More':8},\n            'time':{'7AM':0, '10AM':1, '2PM':2, '6PM':3, '10PM':4}\n        })\n\n        x = df_le.drop('Y', axis=1)\n        y = df_le.Y\n\n        return x, y\n\n    def train_model(x_train, y_train, max_depth, learning_rate, n_estimators):\n\n        model = XGBClassifier(\n            max_depth=max_depth,\n            learning_rate=learning_rate,\n            n_estimators=n_estimators,\n            random_state=42,\n            use_label_encoder=False\n        )\n        model.fit(x_train, y_train)\n        return model\n\n    def evaluate_model(model, x_test, y_test, x_sm_train_hashing, y_sm_train):\n        y_pred = model.predict(x_test)\n        y_pred_proba = model.predict_proba(x_test)\n        y_pred_train = model.predict(x_sm_train_hashing)\n        y_pred_train_proba = model.predict_proba(x_sm_train_hashing)\n\n        accuracy = accuracy_score(y_test, y_pred)\n        precision = precision_score(y_test, y_pred)\n        recall = recall_score(y_test, y_pred)\n\n        # roc_auc_train_proba = roc_auc_score(y_sm_train, y_pred_train_proba[:, 1])\n        # roc_auc_test_proba = roc_auc_score(y_test, y_pred_proba[:, 1])\n\n        return accuracy,precision,recall\n\n    def encode_features(x, n_components=27):\n        hashing_ros_enc = HashingEncoder(cols=['passanger_destination', 'marital_hasChildren', 'occupation', 'coupon',\n                                               'temperature_weather'], n_components=n_components).fit(x)\n        x_test_hashing = hashing_ros_enc.transform(x.reset_index(drop=True))\n        return x_test_hashing\n\n    def oversample_data(x_train_hashing, y_train):\n        sm = SMOTE(random_state=42)\n        x_sm_train_hashing, y_sm_train = sm.fit_resample(x_train_hashing, y_train)\n        return x_sm_train_hashing, y_sm_train\n\n    def save_model_artifact(pipeline):\n        artifact_name = 'model.bst'\n        pipeline.save_model(artifact_name)\n        model_artifact = bucket.blob('coupon-recommendation/artifacts/'+artifact_name)\n        model_artifact.upload_from_filename(artifact_name)\n\n    input_file = \"gs://udemy-gcp-mlops/coupon-recommendation/in-vehicle-coupon-recommendation.csv\"\n    df = load_data(input_file)\n    x, y = preprocess_data(df)\n\n    x_train, x_test, y_train, y_test = train_test_split(x, y, test_size=0.3, random_state=42)\n\n    x_train.fillna(x_train.mode().iloc[0], inplace=True)\n    x_test.fillna(x_train.mode().iloc[0], inplace=True)\n\n    model_name = 'xgboost'\n    print(\"Training and evaluating\", model_name, \"model:\")\n    x_train_hashing = encode_features(x_train)\n    x_test_hashing = encode_features(x_test)\n    x_sm_train_hashing, y_sm_train = oversample_data(x_train_hashing,y_train)\n\n    pipeline = train_model(x_sm_train_hashing,y_sm_train,max_depth,learning_rate,n_estimators)\n\n    accuracy,precision,recall = evaluate_model(pipeline,x_test_hashing,y_test,x_sm_train_hashing,y_sm_train)\n    metrics.log_metric(\"accurancy\", accuracy)\n    metrics.log_metric(\"precision\", precision)\n    metrics.log_metric(\"recall\", recall)\n\n    model_validation = \"true\"\n    if accuracy > 0.5 and precision > 0.5 and recall > 0.5:\n        save_model_artifact(pipeline)\n        model_validation = \"true\"\n    else:\n        model_validation = \"false\"\n\n    return (model_validation,)\n\n"
+          ],
+          "image": "python:3.8"
+        }
+      },
+      "exec-validate-input-ds": {
+        "container": {
+          "args": [
+            "--executor_input",
+            "{{$}}",
+            "--function_to_execute",
+            "validate_input_ds"
+          ],
+          "command": [
+            "sh",
+            "-c",
+            "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip || python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet --no-warn-script-location 'gcsfs' 'pandas' 'google-cloud-storage' 'kfp' && \"$0\" \"$@\"\n",
+            "sh",
+            "-ec",
+            "program_path=$(mktemp -d)\n\nprintf \"%s\" \"$0\" > \"$program_path/ephemeral_component.py\"\n_KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         \"$program_path/ephemeral_component.py\"                         \"$@\"\n",
+            "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import *\n\ndef validate_input_ds(filename: str) -> NamedTuple(\"output\", [(\"input_validation\", str)]):\n\n    import logging\n    from google.cloud import storage\n    import pandas as pd\n\n    logging.basicConfig(level=logging.INFO)\n\n    logging.info(f\"Reading file: {filename}\")\n    df = pd.read_csv(filename)\n    expected_num_cols = 17\n    num_cols = len(df.columns)\n\n    logging.info(f\"Number of columns: {num_cols}\")\n\n    input_validation = \"true\"\n\n    # if num_cols != expected_num_cols:\n        # input_validation=\"false\"\n\n    expected_col_names = ['destination', 'passanger', 'weather', 'temperature', 'time', 'coupon',\n                               'expiration', 'gender', 'age', 'maritalStatus', 'has_children',\n                               'education', 'occupation', 'income', 'car', 'Bar', 'CoffeeHouse',\n                               'CarryAway', 'RestaurantLessThan20', 'Restaurant20To50',\n                               'toCoupon_GEQ5min', 'toCoupon_GEQ15min', 'toCoupon_GEQ25min',\n                               'direction_same', 'direction_opp', 'Y']\n\n    if set(df.columns) != set(expected_col_names):\n        input_validation = \"false\"\n\n    return (input_validation, )\n\n"
+          ],
+          "image": "python:3.8"
+        }
+      }
+    }
+  },
+  "pipelineInfo": {
+    "name": "coupon-model-training-pipeline"
+  },
+  "root": {
+    "dag": {
+      "outputs": {
+        "artifacts": {
+          "custom-training-job-component-metrics": {
+            "artifactSelectors": [
+              {
+                "outputArtifactKey": "custom-training-job-component-metrics",
+                "producerSubtask": "condition-1"
+              }
+            ]
+          }
+        }
+      },
+      "tasks": {
+        "condition-1": {
+          "componentRef": {
+            "name": "comp-condition-1"
+          },
+          "dependentTasks": [
+            "validate-input-ds"
+          ],
+          "inputs": {
+            "parameters": {
+              "pipelinechannel--validate-input-ds-input_validation": {
+                "taskOutputParameter": {
+                  "outputParameterKey": "input_validation",
+                  "producerTask": "validate-input-ds"
+                }
+              }
+            }
+          },
+          "taskInfo": {
+            "name": "condition-1"
+          },
+          "triggerPolicy": {
+            "condition": "inputs.parameter_values['pipelinechannel--validate-input-ds-input_validation'] == 'true'"
+          }
+        },
+        "validate-input-ds": {
+          "cachingOptions": {
+            "enableCache": true
+          },
+          "componentRef": {
+            "name": "comp-validate-input-ds"
+          },
+          "inputs": {
+            "parameters": {
+              "filename": {
+                "runtimeValue": {
+                  "constant": "gs://udemy-gcp-mlops/coupon-recommendation/in-vehicle-coupon-recommendation.csv"
+                }
+              }
+            }
+          },
+          "taskInfo": {
+            "name": "validate-input-ds"
+          }
+        }
+      }
+    },
+    "inputDefinitions": {
+      "parameters": {
+        "project": {
+          "defaultValue": "dataanalytics-347914",
+          "isOptional": true,
+          "parameterType": "STRING"
+        },
+        "region": {
+          "defaultValue": "us-central1",
+          "isOptional": true,
+          "parameterType": "STRING"
+        }
+      }
+    },
+    "outputDefinitions": {
+      "artifacts": {
+        "custom-training-job-component-metrics": {
+          "artifactType": {
+            "schemaTitle": "system.Metrics",
+            "schemaVersion": "0.0.1"
+          }
+        }
+      }
+    }
+  },
+  "schemaVersion": "2.1.0",
+  "sdkVersion": "kfp-2.8.0"
+}

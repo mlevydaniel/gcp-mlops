@@ -1,0 +1,11 @@
+scikit-learn==1.2.2
+xgboost==1.6.2
+pandas==2.0.3
+numpy==1.25.2
+pyarrow
+pytest==8.3.2
+category_encoders
+requests==2.32.3
+google-cloud-storage
+google-cloud-bigquery
+dill

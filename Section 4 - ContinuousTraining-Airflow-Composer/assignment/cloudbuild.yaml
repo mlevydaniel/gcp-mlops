@@ -1,0 +1,25 @@
+steps:
+- name: 'gcr.io/cloud-builders/docker'
+  args: ['build', '-t', 'us-central1-docker.pkg.dev/dataanalytics-347914/python-apps/advertising-model', '.']
+
+- name: 'gcr.io/cloud-builders/docker'
+  args: ['push', 'us-central1-docker.pkg.dev/dataanalytics-347914/python-apps/advertising-model']
+
+- name: 'us-central1-docker.pkg.dev/dataanalytics-347914/python-apps/advertising-model'
+  entrypoint: 'bash'
+  args:
+   - '-c'
+   - |
+      python -m pytest
+
+- name: 'gcr.io/cloud-builders/git'
+  args: ['clone', 'https://github.com/mlevydaniel/advertising-model-training-repo.git']
+
+- name: 'gcr.io/cloud-builders/gsutil'
+  args: ['cp', 'advertising-model-training-repo/advertising_model_training.py', 'gs://us-central1-mlops-airflow-a37b7a16-bucket/dags']
+
+images:
+- 'us-central1-docker.pkg.dev/dataanalytics-347914/python-apps/advertising-model'
+
+options:
+  logging: CLOUD_LOGGING_ONLY

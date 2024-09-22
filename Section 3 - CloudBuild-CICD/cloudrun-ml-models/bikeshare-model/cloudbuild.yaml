@@ -1,0 +1,28 @@
+steps:
+- name: 'gcr.io/cloud-builders/docker'
+  args: ['build', '-t', 'us-central1-docker.pkg.dev/dataanalytics-347914/python-apps/bike-share-model-inference', '.']
+
+- name: 'gcr.io/cloud-builders/docker'
+  args: ['push', 'us-central1-docker.pkg.dev/dataanalytics-347914/python-apps/bike-share-model-inference']
+
+- name: 'us-central1-docker.pkg.dev/dataanalytics-347914/python-apps/bike-share-model-inference'
+  entrypoint: 'python'
+  args: ['-m', 'pytest', 'test_main.py', '-v']
+  id: 'run-tests'
+  
+- name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+  entrypoint: gcloud
+  args:
+   - 'run'
+   - 'deploy'
+   - 'bike-share-model-inference'
+   - '--image'
+   - 'us-central1-docker.pkg.dev/dataanalytics-347914/python-apps/bike-share-model-inference'
+   - '--region'
+   - 'us-central1'
+   - '--allow-unauthenticated'
+images:
+- 'us-central1-docker.pkg.dev/dataanalytics-347914/python-apps/bike-share-model-inference'
+
+options:
+  logging: CLOUD_LOGGING_ONLY

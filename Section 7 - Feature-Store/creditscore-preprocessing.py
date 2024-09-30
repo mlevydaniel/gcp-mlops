@@ -3,10 +3,11 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report, confusion_matrix
 from xgboost import XGBClassifier
 from google.cloud import storage
-from sklearn.metrics import precision_score, recall_score, roc_auc_score, accuracy_score,confusion_matrix
+from sklearn.metrics import precision_score, recall_score, roc_auc_score, accuracy_score, confusion_matrix
 
 storage_client = storage.Client()
 bucket = storage_client.bucket("sid-kubeflow-v1")
+
 
 def purpose_encode(x):
     if x == "Consumer Goods":
@@ -22,6 +23,7 @@ def purpose_encode(x):
     else:
         return 0
 
+
 def other_parties_encode(x):
     if x == "Guarantor":
         return 1
@@ -29,6 +31,7 @@ def other_parties_encode(x):
         return 2
     else:
         return 0
+
 
 def qualification_encode(x):
     if x == "unskilled":
@@ -40,11 +43,13 @@ def qualification_encode(x):
     else:
         return 0
 
+
 def credit_standing_encode(x):
     if x == "good":
         return 1
     else:
         return 0
+
 
 def assets_encode(x):
     if x == "Vehicle":
@@ -56,6 +61,7 @@ def assets_encode(x):
     else:
         return 0
 
+
 def housing_encode(x):
     if x == "rent":
         return 1
@@ -63,6 +69,7 @@ def housing_encode(x):
         return 2
     else:
         return 0
+
 
 def marital_status_encode(x):
     if x == "Married":
@@ -72,6 +79,7 @@ def marital_status_encode(x):
     else:
         return 0
 
+
 def other_payment_plans_encode(x):
     if x == "bank":
         return 1
@@ -80,14 +88,17 @@ def other_payment_plans_encode(x):
     else:
         return 0
 
+
 def sex_encode(x):
     if x == "M":
         return 1
     else:
         return 0
-    
+
+
 def credit_score_decode(x):
     return "Approved" if x == 1 else "Denied"
+
 
 def preprocess_data(df):
     df["PURPOSE_CODE"] = df["PURPOSE"].apply(purpose_encode)
@@ -112,7 +123,7 @@ def split_data(df):
     return X_train, X_test, y_train, y_test
 
 
-def train_model(X_train, y_train,max_depth,learning_rate,n_estimators):    
+def train_model(X_train, y_train, max_depth, learning_rate, n_estimators):
     model = XGBClassifier(
         max_depth=max_depth,
         learning_rate=learning_rate,
@@ -123,11 +134,13 @@ def train_model(X_train, y_train,max_depth,learning_rate,n_estimators):
     model.fit(X_train, y_train)
     return model
 
+
 def save_model_artifact(pipeline):
     artifact_name = 'model.bst'
     pipeline.save_model(artifact_name)
     model_artifact = bucket.blob('credit-scoring/artifacts/'+artifact_name)
     model_artifact.upload_from_filename(artifact_name)
+
 
 def evaluate_model(model, X_test, y_test):
     y_pred = model.predict(X_test)
@@ -135,23 +148,23 @@ def evaluate_model(model, X_test, y_test):
     precision = precision_score(y_test, y_pred)
     recall = recall_score(y_test, y_pred)
     confusion_matrix = confusion_matrix(y_test, y_pred)
-    
-    return accuracy,precision,recall
-    
+
+    return accuracy, precision, recall
+
 input_file = "gs://sid-kubeflow-v1/credit-scoring/credit_files.csv"
 credit_df = pd.read_csv(input_file)
 credit_df = preprocess_data(credit_df)
 
 X_train, X_test, y_train, y_test = split_data(credit_df)
 
-max_depth=5
-learning_rate=0.2
-n_estimators=40
-pipeline = train_model(X_train, y_train,max_depth,learning_rate,n_estimators)
+max_depth = 5
+learning_rate = 0.2
+n_estimators = 40
+pipeline = train_model(X_train, y_train, max_depth, learning_rate, n_estimators)
 
-accuracy,precision,recall = evaluate_model(pipeline, X_test, y_test)
+accuracy, precision, recall = evaluate_model(pipeline, X_test, y_test)
 
-if accuracy>0.5 and precision>0.5 :
+if accuracy > 0.5 and precision > 0.5:
     save_model_artifact(pipeline)
     model_validation="true"
 else :

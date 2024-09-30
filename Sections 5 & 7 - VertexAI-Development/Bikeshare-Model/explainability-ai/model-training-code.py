@@ -55,7 +55,7 @@ def train_model(model_name, x_train, y_train):
 
 def save_model_artifact(pipeline):
     artifact_name = 'model.joblib'
-    dump(pipeline,artifact_name,compress=9)
+    dump(pipeline, artifact_name, compress=9)
     model_artifact = bucket.blob('bikeshare-model/artifact/'+artifact_name)
     model_artifact.upload_from_filename(artifact_name)
 
